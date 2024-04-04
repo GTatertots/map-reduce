@@ -1,3 +1,5 @@
+// package main
+
 package mapreduce
 
 import (
@@ -208,3 +210,33 @@ func gatherInto(db *sql.DB, path string) error {
 	// might as well delete it now; might even save some disk writes
 	return os.Remove(path)
 }
+
+// func main() {
+// 	// paths, err := splitDatabase("input.db", "output-%d.db", 50)
+
+// 	// err := splitDatabase("austen.db", []string{"austen-0.db", "austen-1.db"})
+// 	// if err != nil {
+// 	// 	fmt.Printf("Failed")
+// 	// }
+
+
+
+
+
+
+
+// 	tempdir := "/temp"
+// 	go func() {
+// 		http.Handle("/data/", http.StripPrefix("/data", http.FileServer(http.Dir(tempdir))))
+// 		if err := http.ListenAndServe("localhost:8080", nil); err != nil {
+// 			log.Printf("Error in HTTP server for: %v", err)
+// 		}
+// 	}()
+
+// 	output, err := mergeDatabases([]string{"http://localhost:8080/data/austen-0.db", "http://localhost:8080/data/austen-1.db"}, "output.db",tempdir)
+// 	if err != nil {
+// 		fmt.Println("Error merging")
+// 	}
+
+// 	fmt.Println(output)
+// }
