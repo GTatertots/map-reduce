@@ -2,7 +2,7 @@ package mapreduce
 
 import (
 	"fmt"
-	"log"
+  "log"
 )
 
 type MapTask struct {
@@ -39,21 +39,20 @@ func makeURL(host, file string) string { return fmt.Sprintf("http://%s/data/%s",
 
 // map task
 func (task *MapTask) Process(tempdir string, client Interface) error {
-
-	err := download(task.SourceHost, tempdir)
-	if err != nil {
-		log.Fatalf("Failed to download: %s", err)
-	}
-
-	for i := 0; i < 10; i++ {
-		outputName := mapOutputFile(0, i)
-		
-		
-
-	}
-
-
-
-
+  err := download(task.SourceHost, tempdir)
+  if err != nil {
+    log.Fatalf("worker.go: Process & download - %v", err)
+  }
+  outputFileNames := make([]string, 0)
+  for i := 0; i < 16; i++ {
+    outputFileNames = append(outputFileNames, mapInputFile(i))
+  }
+  err = splitDatabase(tempdir, outputFileNames)
+  if err != nil {
+    log.Fatalf("worker.go: Process & splitDatabase - %v", err)
+  }
+  for fileName := range outputFileNames {
+    client.Map(fileName,)
+  }
 	return nil
 }
