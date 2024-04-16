@@ -10,6 +10,9 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"database/sql"
+	_ "github.com/mattn/go-sqlite3"
+  "hash/fnv"
 )
 
 type MapTask struct {
@@ -94,6 +97,154 @@ func (c Client) Reduce(key string, values <-chan string, output chan<- Pair) err
 	return nil
 }
 
+func (task *MapTask) Process(tempdir string, client Interface) error {
+  // logging stuff
+  countPairs := 0
+  countGenerated := 0
+  // Download and open the input file
+  log.Printf("tempdir %s, task.SourceHost %s", tempdir, task.SourceHost)
+  if err := download(makeURL(task.SourceHost, mapSourceFile(task.N)), mapInputFile(task.N)); err != nil {
+		log.Fatalf("unable to download input file: %v", err)
+  } 
+  db, err := openDatabase(mapInputFile(task.N))
+  if err != nil {
+		log.Fatalf("unable to open input file: %v", err)
+  } 
+  defer db.Close()
+  var outputDBs []*sql.DB
+  // Create the output files
+  for i := 0; i < task.R; i++ {
+    outputFile, err := createDatabase(mapOutputFile(task.N, task.R))
+    if err != nil {
+      log.Fatalf("failed to create output file: %v", err)
+    }
+    defer outputFile.Close()
+    outputDBs = append(outputDBs, outputFile)
+  }
+
+  // Run a database query to select all pairs from the source file.
+  //   For each pair:
+  //     Call `client.Map` with the data pair
+  //     Gather all Pair objects the client feeds back through the
+  //     output channel and insert each pair into the appropriate
+  //     output database. This process stops when the client closes
+  //     the channel.
+  outputChannel := make(chan Pair)
+	rows, err := db.Query("select key, value from pairs")
+	if err != nil {
+		log.Printf("error in select query from database maptask process: %v", err)
+		return err
+  }
+	defer rows.Close()
+	for rows.Next() {
+    countPairs++
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			log.Printf("error scanning row value maptask process: %v", err)
+			return err
+		}
+    client.Map(key, value, outputChannel)
+    for pair := range outputChannel {
+      countGenerated++
+      hash := fnv.New32() // from the stdlib package hash/fnv
+      hash.Write([]byte(pair.Key))
+      r := int(hash.Sum32() % uint32(task.R))
+      insert := outputDBs[r]
+      if _, err := insert.Exec(key, value); err != nil {
+        log.Printf("db error inserting row to maptask process output database: %v", err)
+        return err
+      }
+    }
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("db error iterating over inputs maptask process: %v", err)
+		return err
+	}
+  log.Printf("map task processed %d pairs, generated %d pairs", countPairs, countGenerated)
+  return nil
+}
+
+func (task *ReduceTask) Process(tempdir string, client Interface) error {
+  // Create the input database by merging all of the appropriate
+  // output databases from the map phase
+  var urls []string
+  for i := range task.SourceHosts {
+    urls = append(urls, makeURL(task.SourceHosts[i], reducePartialFile(i)))
+  } 
+  db, err := mergeDatabases(urls, reduceInputFile(task.N), tempdir)
+  if err != nil {
+    log.Fatalf("merge database error reducetask process: %v", err)
+  }
+  defer db.Close()
+
+  // Create the output database
+  outputDB, err := createDatabase(reduceOutputFile(task.N))
+  if err != nil {
+    log.Fatalf("failed to create output database reducetask process: %v", err)
+  }
+  defer outputDB.Close()
+
+  // 
+  // Process all pairs in the correct order. This is trickier than in
+  // the map phase. Use this query:
+  // 
+  //     select key, value from pairs order by key, value
+  // 
+  // It will sort all of the data and return it in the proper order.
+  // As you loop over the key/value pairs, take note whether the key
+  // for a new row is the same or different from the key of the
+  // previous row.
+  // 
+  // When you encounter a key for the first time:
+  // 
+  //    Close out the previous call to `client.Reduce` (unless this
+  //    is the first key, of course). This includes closing the
+  //    input channel (so `Reduce` will know it has processed all
+  //    values for the given key) and waiting for it to finish.
+  //    Start a new call to `client.Reduce`. Carefully plan how you
+  //    will manage the necessary goroutines and channels. This
+  //    includes receiving output pairs and inserting them into the
+  //    output database.
+  // 
+	rows, err := db.Query("select key, value from pairs order by key, value")
+	if err != nil {
+		log.Printf("error in select query from database reducetask process: %v", err)
+		return err
+  }
+	defer rows.Close()
+  prevKey := ""
+  outputChannel := make(chan Pair)
+  countRows := 0
+	for rows.Next() {
+    countRows++
+    values := make(chan string)
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			log.Printf("error scanning row value reducetask process: %v", err)
+			return err
+		}
+    if key != prevKey {
+      if countRows == 1 {
+        close(outputChannel)
+      }
+      client.Reduce(key, values, outputChannel)
+
+    }
+    prevKey = key
+  }
+	if err := rows.Err(); err != nil {
+		log.Printf("db error iterating over inputs maptask process: %v", err)
+		return err
+	}
+
+  // Be vigilant about watching for and handling errors in all code. Make
+  // sure that you close all databases before returning.
+  // 
+  // Also, when you finish processing all rows, do not forget to close
+  // out the final call to `client.Reduce`.
+  return nil
+}
+
 func main() {
 	m := 10
 	r := 5
@@ -121,10 +272,14 @@ func main() {
 
 	myAddress := net.JoinHostPort(getLocalAddress(), "3410")
 	log.Printf("starting http server at %s", myAddress)
+  http.Handle("/data/", http.StripPrefix("/data", http.FileServer(http.Dir(tempdir))))
+  listener, err := net.Listen("tcp", myAddress)
+  if err != nil {
+    log.Fatalf("Error in HTTP server listen for %s: %v", myAddress, err)
+  }
 	go func() {
-		http.Handle("/data/", http.StripPrefix("/data", http.FileServer(http.Dir(tempdir))))
-		if err := http.ListenAndServe(myAddress, nil); err != nil {
-			log.Fatalf("Error in HTTP server for %s: %v", myAddress, err)
+		if err := http.Serve(listener, nil); err != nil {
+			log.Fatalf("Error in HTTP server serve for %s: %v", myAddress, err)
 		}
 	}()
 
@@ -170,6 +325,5 @@ func main() {
 			log.Fatalf("processing reduce task %d: %v", i, err)
 		}
 	}
-
 	// gather outputs into final target.db file
 }
