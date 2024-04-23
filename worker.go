@@ -171,9 +171,6 @@ func (task *MapTask) Process(tempdir string, client Interface) error {
 }
 
 func (task *ReduceTask) Process(tempdir string, client Interface) error {
-	countedKeys := 0
-	countedValues := 0
-	countedPairs := 0
 	// Create the input database by merging all of the appropriate
 	// output databases from the map phase
 	var urls []string
@@ -225,19 +222,23 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 	outputChannel := make(chan Pair)
 	countRows := 0
 	values := make(chan string)
+	countedKeys := 0
+	countedValues := 0
+	countedPairs := 0
 
 	for rows.Next() {
-		countedPairs++
+		countedValues++
 		countRows++
 		var key, value string
 		if err := rows.Scan(&key, &value); err != nil {
 			log.Fatalf("error scanning row value reducetask process: %v", err)
 			return err
 		}
-		countedKeys++
 		
 		//encountering a key for the first time
 		if key != prevKey {
+			countedPairs++
+			countedKeys++
 			if countRows != 1 {
 				close(values)
 				values = make(chan string)
@@ -247,7 +248,6 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 			}()
 		}
 		values <- value
-		countedValues++
 		prevKey = key
 	}
 	if err := rows.Err(); err != nil {
@@ -266,8 +266,8 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 }
 
 func main() {
-	m := 10
-	r := 5
+	m := 9
+	r := 3
 	source := "source.db"
 	//target := "target.db"
 	tmp := os.TempDir()
