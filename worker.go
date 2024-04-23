@@ -235,7 +235,7 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 			return err
 		}
 		
-		//encountering a key for the first time
+		// encountering a key for the first time
 		if key != prevKey {
 			countedPairs++
 			countedKeys++
@@ -245,6 +245,11 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 			}
 			go func() {
 				client.Reduce(key, values, outputChannel)
+        for pair := range outputChannel {
+          if _, err := outputDB.Exec(`insert into pairs (key, value) values (?, ?)`, pair.Key, pair.Value); err != nil {
+            log.Printf("db error inserting row to maptask process output database: %v", err)
+          }
+        }
 			}()
 		}
 		values <- value
