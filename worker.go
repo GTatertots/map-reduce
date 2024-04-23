@@ -171,6 +171,9 @@ func (task *MapTask) Process(tempdir string, client Interface) error {
 }
 
 func (task *ReduceTask) Process(tempdir string, client Interface) error {
+	countedKeys := 0
+	countedValues := 0
+	countedPairs := 0
 	// Create the input database by merging all of the appropriate
 	// output databases from the map phase
 	var urls []string
@@ -182,8 +185,6 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 		log.Fatalf("merge database error reducetask process: %v", err)
 	}
 	defer db.Close()
-
-	fmt.Println("GOT PAST MERGE")
 
 	// Create the output database
 	outputDB, err := createDatabase(filepath.Join(tempdir, reduceOutputFile(task.N)))
@@ -226,21 +227,27 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 	values := make(chan string)
 
 	for rows.Next() {
+		countedPairs++
 		countRows++
 		var key, value string
 		if err := rows.Scan(&key, &value); err != nil {
 			log.Fatalf("error scanning row value reducetask process: %v", err)
 			return err
 		}
+		countedKeys++
+		
 		//encountering a key for the first time
 		if key != prevKey {
 			if countRows != 1 {
 				close(values)
 				values = make(chan string)
 			}
-			client.Reduce(key, values, outputChannel)
+			go func() {
+				client.Reduce(key, values, outputChannel)
+			}()
 		}
 		values <- value
+		countedValues++
 		prevKey = key
 	}
 	if err := rows.Err(); err != nil {
@@ -254,6 +261,7 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 	//
 	// Also, when you finish processing all rows, do not forget to close
 	// out the final call to `client.Reduce`.
+	log.Printf("reduce task processed %d keys and %d values, generated %d pairs\n", countedKeys, countedValues, countedPairs)
 	return nil
 }
 
