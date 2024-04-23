@@ -103,10 +103,10 @@ func (task *MapTask) Process(tempdir string, client Interface) error {
 	countPairs := 0
 	countGenerated := 0
 	// Download and open the input file
-	if err := download(makeURL(task.SourceHost, mapSourceFile(task.N)), mapInputFile(task.N)); err != nil {
+	if err := download(makeURL(task.SourceHost, mapSourceFile(task.N)), filepath.Join(tempdir, mapInputFile(task.N))); err != nil {
 		log.Fatalf("unable to download input file: %v", err)
 	}
-	db, err := openDatabase(mapInputFile(task.N))
+	db, err := openDatabase(filepath.Join(tempdir, mapInputFile(task.N)))
 	if err != nil {
 		log.Fatalf("unable to open input file: %v", err)
 	}
@@ -114,7 +114,7 @@ func (task *MapTask) Process(tempdir string, client Interface) error {
 	var outputDBs []*sql.DB
 	// Create the output files
 	for i := 0; i < task.R; i++ {
-		outputFile, err := createDatabase(mapOutputFile(task.N, task.R))
+		outputFile, err := createDatabase(filepath.Join(tempdir, mapOutputFile(task.N, task.R)))
 		if err != nil {
 			log.Fatalf("failed to create output file: %v", err)
 		}
