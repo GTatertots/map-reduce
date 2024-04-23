@@ -67,7 +67,6 @@ func getLocalAddress() string {
 type Client struct{}
 
 func (c Client) Map(key, value string, output chan<- Pair) error {
-	fmt.Println("called Client Map")
 	defer close(output)
 	lst := strings.Fields(value)
 	for _, elt := range lst {
@@ -104,16 +103,13 @@ func (task *MapTask) Process(tempdir string, client Interface) error {
 	countPairs := 0
 	countGenerated := 0
 	// Download and open the input file
-	log.Printf("tempdir %s, task.SourceHost %s", tempdir, task.SourceHost)
 	if err := download(makeURL(task.SourceHost, mapSourceFile(task.N)), mapInputFile(task.N)); err != nil {
 		log.Fatalf("unable to download input file: %v", err)
 	}
-	fmt.Println("made it to open database")
 	db, err := openDatabase(mapInputFile(task.N))
 	if err != nil {
 		log.Fatalf("unable to open input file: %v", err)
 	}
-	fmt.Println("made it past open database")
 	defer db.Close()
 	var outputDBs []*sql.DB
 	// Create the output files
@@ -125,7 +121,6 @@ func (task *MapTask) Process(tempdir string, client Interface) error {
 		defer outputFile.Close()
 		outputDBs = append(outputDBs, outputFile)
 	}
-	fmt.Println("made it past create databases")
 
 	// Run a database query to select all pairs from the source file.
 	//   For each pair:
@@ -134,21 +129,7 @@ func (task *MapTask) Process(tempdir string, client Interface) error {
 	//     output channel and insert each pair into the appropriate
 	//     output database. This process stops when the client closes
 	//     the channel.
-	outputChannel := make(chan Pair)
-	go func() {
-		for pair := range outputChannel {
-			countGenerated++
-			hash := fnv.New32() // from the stdlib package hash/fnv
-			hash.Write([]byte(pair.Key))
-			r := int(hash.Sum32() % uint32(task.R))
-			db := outputDBs[r]
-			fmt.Println(pair.Key, pair.Value)
-			if _, err := db.Exec(`insert into pairs (key, value) values (?, ?)`, pair.Key, pair.Value); err != nil {
-				log.Printf("db error inserting row to maptask process output database: %v", err)
-				//return err
-			}
-		}
-	}()
+
 	rows, err := db.Query("select key, value from pairs")
 	if err != nil {
 		log.Printf("error in select query from database maptask process: %v", err)
@@ -161,13 +142,26 @@ func (task *MapTask) Process(tempdir string, client Interface) error {
 		if err := rows.Scan(&key, &value); err != nil {
 			log.Fatalf("error scanning row value maptask process: %v", err)
 			return err
-		}
-		fmt.Println(key, value)
+		}	
+    outputChannel := make(chan Pair)
+    finished := make(chan int)
+    go func() {
+      for pair := range outputChannel {
+        countGenerated++
+        hash := fnv.New32() // from the stdlib package hash/fnv
+        hash.Write([]byte(pair.Key))
+        r := int(hash.Sum32() % uint32(task.R))
+        db := outputDBs[r]
+        if _, err := db.Exec(`insert into pairs (key, value) values (?, ?)`, pair.Key, pair.Value); err != nil {
+          log.Printf("db error inserting row to maptask process output database: %v", err)
+          //return err
+        }
+      }
+      finished<-0
+    }()
 		client.Map(key, value, outputChannel)
-		outputChannel = make(chan Pair)
-		fmt.Println("after client.Map")
+    <-finished
 	}
-	fmt.Println("made it past reading rows")
 	if err := rows.Err(); err != nil {
 		log.Printf("db error iterating over inputs maptask process: %v", err)
 		return err
