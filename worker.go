@@ -175,16 +175,18 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 	// output databases from the map phase
 	var urls []string
 	for i := range task.SourceHosts {
-		urls = append(urls, makeURL(task.SourceHosts[i], reducePartialFile(i)))
+		urls = append(urls, makeURL(task.SourceHosts[i], mapOutputFile(i, task.R)))
 	}
-	db, err := mergeDatabases(urls, reduceInputFile(task.N), tempdir)
+	db, err := mergeDatabases(urls, filepath.Join(tempdir,reduceInputFile(task.N)), filepath.Join(tempdir, reduceTempFile(task.N)))
 	if err != nil {
 		log.Fatalf("merge database error reducetask process: %v", err)
 	}
 	defer db.Close()
 
+	fmt.Println("GOT PAST MERGE")
+
 	// Create the output database
-	outputDB, err := createDatabase(reduceOutputFile(task.N))
+	outputDB, err := createDatabase(filepath.Join(tempdir, reduceOutputFile(task.N)))
 	if err != nil {
 		log.Fatalf("failed to create output database reducetask process: %v", err)
 	}
