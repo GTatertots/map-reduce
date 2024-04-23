@@ -114,7 +114,7 @@ func (task *MapTask) Process(tempdir string, client Interface) error {
 	var outputDBs []*sql.DB
 	// Create the output files
 	for i := 0; i < task.R; i++ {
-		outputFile, err := createDatabase(filepath.Join(tempdir, mapOutputFile(task.N, task.R)))
+		outputFile, err := createDatabase(filepath.Join(tempdir, mapOutputFile(task.N, i)))
 		if err != nil {
 			log.Fatalf("failed to create output file: %v", err)
 		}
@@ -171,14 +171,11 @@ func (task *MapTask) Process(tempdir string, client Interface) error {
 }
 
 func (task *ReduceTask) Process(tempdir string, client Interface) error {
-	countedKeys := 0
-	countedValues := 0
-	countedPairs := 0
 	// Create the input database by merging all of the appropriate
 	// output databases from the map phase
 	var urls []string
 	for i := range task.SourceHosts {
-		urls = append(urls, makeURL(task.SourceHosts[i], mapOutputFile(i, task.R)))
+		urls = append(urls, makeURL(task.SourceHosts[i], mapOutputFile(i, task.N)))
 	}
 	db, err := mergeDatabases(urls, filepath.Join(tempdir,reduceInputFile(task.N)), filepath.Join(tempdir, reduceTempFile(task.N)))
 	if err != nil {
@@ -225,19 +222,23 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 	outputChannel := make(chan Pair)
 	countRows := 0
 	values := make(chan string)
+	countedKeys := 0
+	countedValues := 0
+	countedPairs := 0
 
 	for rows.Next() {
-		countedPairs++
+		countedValues++
 		countRows++
 		var key, value string
 		if err := rows.Scan(&key, &value); err != nil {
 			log.Fatalf("error scanning row value reducetask process: %v", err)
 			return err
 		}
-		countedKeys++
 		
 		//encountering a key for the first time
 		if key != prevKey {
+			countedPairs++
+			countedKeys++
 			if countRows != 1 {
 				close(values)
 				values = make(chan string)
@@ -247,7 +248,6 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 			}()
 		}
 		values <- value
-		countedValues++
 		prevKey = key
 	}
 	if err := rows.Err(); err != nil {
@@ -266,8 +266,8 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 }
 
 func main() {
-	m := 10
-	r := 5
+	m := 9
+	r := 3
 	source := "source.db"
 	//target := "target.db"
 	tmp := os.TempDir()
