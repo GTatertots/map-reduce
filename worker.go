@@ -114,7 +114,7 @@ func (task *MapTask) Process(tempdir string, client Interface) error {
 	var outputDBs []*sql.DB
 	// Create the output files
 	for i := 0; i < task.R; i++ {
-		outputFile, err := createDatabase(filepath.Join(tempdir, mapOutputFile(task.N, task.R)))
+		outputFile, err := createDatabase(filepath.Join(tempdir, mapOutputFile(task.N, i)))
 		if err != nil {
 			log.Fatalf("failed to create output file: %v", err)
 		}
@@ -178,7 +178,7 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 	// output databases from the map phase
 	var urls []string
 	for i := range task.SourceHosts {
-		urls = append(urls, makeURL(task.SourceHosts[i], mapOutputFile(i, task.R)))
+		urls = append(urls, makeURL(task.SourceHosts[i], mapOutputFile(i, task.N)))
 	}
 	db, err := mergeDatabases(urls, filepath.Join(tempdir,reduceInputFile(task.N)), filepath.Join(tempdir, reduceTempFile(task.N)))
 	if err != nil {
@@ -346,4 +346,13 @@ func main() {
 		}
 	}
 	// gather outputs into final target.db file
+  var urls []string
+	for i := range reduceTasks {
+		urls = append(urls, makeURL(myAddress, reduceOutputFile(i)))
+	}
+	db, err := mergeDatabases(urls, "target.db", tempdir)
+	if err != nil {
+		log.Fatalf("merge database error main output: %v", err)
+	}
+	defer db.Close()
 }
