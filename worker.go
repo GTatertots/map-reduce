@@ -351,13 +351,13 @@ func main() {
 		}
 	}
 	// gather outputs into final target.db file
-  var urls []string
-	for i := range reduceTasks {
-		urls = append(urls, makeURL(myAddress, reduceOutputFile(i)))
+	urls := make([]string, r)
+	for i := 0; i < r; i++ {
+		urls[i] = makeURL(myAddress, reduceOutputFile(i))
 	}
-	db, err := mergeDatabases(urls, "target.db", tempdir)
-	if err != nil {
-		log.Fatalf("merge database error main output: %v", err)
+
+	log.Println(urls)
+	if _, err := mergeDatabases(urls, "target.db", filepath.Join(tempdir, reduceTempFile(r))); err != nil {
+		log.Fatalf("merging databases: %v", err)
 	}
-	defer db.Close()
 }
