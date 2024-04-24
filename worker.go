@@ -191,28 +191,6 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 	}
 	defer outputDB.Close()
 
-	//
-	// Process all pairs in the correct order. This is trickier than in
-	// the map phase. Use this query:
-	//
-	//     select key, value from pairs order by key, value
-	//
-	// It will sort all of the data and return it in the proper order.
-	// As you loop over the key/value pairs, take note whether the key
-	// for a new row is the same or different from the key of the
-	// previous row.
-	//
-	// When you encounter a key for the first time:
-	//
-	//    Close out the previous call to `client.Reduce` (unless this
-	//    is the first key, of course). This includes closing the
-	//    input channel (so `Reduce` will know it has processed all
-	//    values for the given key) and waiting for it to finish.
-	//    Start a new call to `client.Reduce`. Carefully plan how you
-	//    will manage the necessary goroutines and channels. This
-	//    includes receiving output pairs and inserting them into the
-	//    output database.
-	//
 	rows, err := db.Query("select key, value from pairs order by key, value")
 	if err != nil {
 		log.Printf("error in select query from database reducetask process: %v", err)
@@ -251,9 +229,9 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 			}()
 			go func() {
 				for pair := range outputChannel {
-					log.Println("pair", pair)
+					//log.Println("pair", pair)
 					if _, err := outputDB.Exec(`insert into pairs (key, value) values (?, ?)`, pair.Key, pair.Value); err != nil {
-						log.Printf("db error inserting row to maptask process output database: %v", err)
+						//log.Printf("db error inserting row to reducetask process output database: %v", err)
 					}
 				}
 			}()
@@ -262,7 +240,7 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 		prevKey = key
 	}
 	if err := rows.Err(); err != nil {
-		log.Fatalf("db error iterating over inputs maptask process: %v", err)
+		log.Fatalf("db error iterating over inputs reducetask process: %v", err)
 		return err
 	}
 	close(values)
@@ -363,7 +341,6 @@ func main() {
 		urls[i] = makeURL(myAddress, reduceOutputFile(i))
 	}
 
-	log.Println(urls)
 	if _, err := mergeDatabases(urls, "target.db", filepath.Join(tempdir, reduceTempFile(r))); err != nil {
 		log.Fatalf("merging databases: %v", err)
 	}

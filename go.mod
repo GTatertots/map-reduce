@@ -1,4 +1,4 @@
-module cs3410/mapreduce/starter
+module cs3410/mapreduce/map-reduce
 
 go 1.19
 
