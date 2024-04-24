@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"unicode"
@@ -244,7 +245,9 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 				values = make(chan string)
 			}
 			go func() {
-				client.Reduce(key, values, outputChannel)
+				if err := client.Reduce(key, values, outputChannel); err != nil {
+					log.Fatalf("client reduce error: %v", err)
+				}
 			}()
 			go func() {
 				for pair := range outputChannel {
@@ -274,6 +277,7 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 }
 
 func main() {
+	runtime.GOMAXPROCS(1)
 	m := 9
 	r := 3
 	source := "source.db"
