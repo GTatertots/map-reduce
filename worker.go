@@ -142,25 +142,25 @@ func (task *MapTask) Process(tempdir string, client Interface) error {
 		if err := rows.Scan(&key, &value); err != nil {
 			log.Fatalf("error scanning row value maptask process: %v", err)
 			return err
-		}	
-    outputChannel := make(chan Pair)
-    finished := make(chan int)
-    go func() {
-      for pair := range outputChannel {
-        countGenerated++
-        hash := fnv.New32() // from the stdlib package hash/fnv
-        hash.Write([]byte(pair.Key))
-        r := int(hash.Sum32() % uint32(task.R))
-        db := outputDBs[r]
-        if _, err := db.Exec(`insert into pairs (key, value) values (?, ?)`, pair.Key, pair.Value); err != nil {
-          log.Printf("db error inserting row to maptask process output database: %v", err)
-          //return err
-        }
-      }
-      finished<-0
-    }()
+		}
+		outputChannel := make(chan Pair)
+		finished := make(chan int)
+		go func() {
+			for pair := range outputChannel {
+				countGenerated++
+				hash := fnv.New32() // from the stdlib package hash/fnv
+				hash.Write([]byte(pair.Key))
+				r := int(hash.Sum32() % uint32(task.R))
+				db := outputDBs[r]
+				if _, err := db.Exec(`insert into pairs (key, value) values (?, ?)`, pair.Key, pair.Value); err != nil {
+					log.Printf("db error inserting row to maptask process output database: %v", err)
+					//return err
+				}
+			}
+			finished <- 0
+		}()
 		client.Map(key, value, outputChannel)
-    <-finished
+		<-finished
 	}
 	if err := rows.Err(); err != nil {
 		log.Printf("db error iterating over inputs maptask process: %v", err)
@@ -177,7 +177,7 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 	for i := range task.SourceHosts {
 		urls = append(urls, makeURL(task.SourceHosts[i], mapOutputFile(i, task.N)))
 	}
-	db, err := mergeDatabases(urls, filepath.Join(tempdir,reduceInputFile(task.N)), filepath.Join(tempdir, reduceTempFile(task.N)))
+	db, err := mergeDatabases(urls, filepath.Join(tempdir, reduceInputFile(task.N)), filepath.Join(tempdir, reduceTempFile(task.N)))
 	if err != nil {
 		log.Fatalf("merge database error reducetask process: %v", err)
 	}
@@ -219,7 +219,6 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 	}
 	defer rows.Close()
 	prevKey := ""
-	outputChannel := make(chan Pair)
 	countRows := 0
 	values := make(chan string)
 	countedKeys := 0
@@ -227,6 +226,7 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 	countedPairs := 0
 
 	for rows.Next() {
+		outputChannel := make(chan Pair)
 		countedValues++
 		countRows++
 		var key, value string
@@ -234,7 +234,7 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 			log.Fatalf("error scanning row value reducetask process: %v", err)
 			return err
 		}
-		
+
 		// encountering a key for the first time
 		if key != prevKey {
 			countedPairs++
@@ -245,11 +245,14 @@ func (task *ReduceTask) Process(tempdir string, client Interface) error {
 			}
 			go func() {
 				client.Reduce(key, values, outputChannel)
-        for pair := range outputChannel {
-          if _, err := outputDB.Exec(`insert into pairs (key, value) values (?, ?)`, pair.Key, pair.Value); err != nil {
-            log.Printf("db error inserting row to maptask process output database: %v", err)
-          }
-        }
+			}()
+			go func() {
+				for pair := range outputChannel {
+					log.Println("pair", pair)
+					if _, err := outputDB.Exec(`insert into pairs (key, value) values (?, ?)`, pair.Key, pair.Value); err != nil {
+						log.Printf("db error inserting row to maptask process output database: %v", err)
+					}
+				}
 			}()
 		}
 		values <- value
